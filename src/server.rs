@@ -143,6 +143,7 @@ impl Plugin for ServerPlugin {
             .add_observer(check_mutation_ticks)
             .add_observer(buffer_despawn)
             .add_observer(cleanup_storage)
+            .add_observer(resend_replication)
             .add_systems(
                 PreUpdate,
                 (
@@ -222,6 +223,46 @@ impl Plugin for ServerPlugin {
                 let channels = world.resource::<RepliconChannels>();
                 messages.setup_client_channels(channels.client_channels().len());
             });
+    }
+}
+
+/// Makes the server send its whole visible world to one authorized client again.
+///
+/// Trigger it on the client's entity. The server forgets which entities and components the client
+/// has acknowledged, so the next replication message carries every visible entity and component
+/// as an insertion, exactly as for a newly authorized client. The connection, the client's
+/// [`ClientVisibility`] and its [`PriorityMap`] are kept, and the client applies the insertions to
+/// the entities it already has mapped, so its local entities keep their identity.
+///
+/// Use it to repair a client whose replicated state has drifted from the server's, for example
+/// after a client-side system wrote to a replicated component. Insertions cannot remove anything:
+/// components or entities the client has and the server does not are left for the caller to remove.
+///
+/// ```
+/// use bevy::prelude::*;
+/// use bevy_replicon::{prelude::*, server::ResendReplication};
+///
+/// fn repair(mut commands: Commands, client: Single<Entity, With<AuthorizedClient>>) {
+///     commands.trigger(ResendReplication { client: *client });
+/// }
+/// ```
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub struct ResendReplication {
+    /// The authorized client's entity.
+    #[event_target]
+    pub client: Entity,
+}
+
+fn resend_replication(resend: On<ResendReplication>, mut clients: Query<&mut ClientTicks>) {
+    match clients.get_mut(resend.client) {
+        Ok(mut ticks) => {
+            debug!("resending replication to client `{}`", resend.client);
+            ticks.entities.clear();
+        }
+        Err(_) => debug!(
+            "ignoring replication resend for `{}`, which is not an authorized client",
+            resend.client
+        ),
     }
 }
 
