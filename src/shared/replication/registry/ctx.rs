@@ -118,6 +118,11 @@ pub struct RemoveCtx {
 pub struct DespawnCtx {
     /// Tick for the currently processing message.
     pub message_tick: RepliconTick,
+
+    /// The server entity the despawned client entity stood for.
+    ///
+    /// Its mapping is already gone from [`ServerEntityMap`] when the despawn function runs.
+    pub server_entity: Entity,
 }
 
 /// Buffers entity spawns.

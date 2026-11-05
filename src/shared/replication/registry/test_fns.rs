@@ -232,7 +232,11 @@ impl TestFnsEntityExt for EntityWorldMut<'_> {
 
     fn apply_despawn(self, message_tick: RepliconTick) {
         let registry = self.world().resource::<ReplicationRegistry>();
-        let ctx = DespawnCtx { message_tick };
+        // A test entity stands for no server entity.
+        let ctx = DespawnCtx {
+            message_tick,
+            server_entity: Entity::PLACEHOLDER,
+        };
         (registry.despawn)(&ctx, self);
     }
 }

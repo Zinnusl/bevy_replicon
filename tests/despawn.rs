@@ -1,7 +1,10 @@
 use bevy::{prelude::*, state::app::StatesPlugin};
 use bevy_replicon::{
     prelude::*,
-    shared::server_entity_map::ServerEntityMap,
+    shared::{
+        replication::registry::{ReplicationRegistry, ctx::DespawnCtx},
+        server_entity_map::ServerEntityMap,
+    },
     test_app::{ServerTestAppExt, TestClientEntity},
 };
 use serde::{Deserialize, Serialize};
@@ -47,6 +50,67 @@ fn single() {
     let entity_map = client_app.world().resource::<ServerEntityMap>();
     assert!(entity_map.to_client().is_empty());
     assert!(entity_map.to_server().is_empty());
+}
+
+#[test]
+fn despawn_fn_receives_server_entity() {
+    let mut server_app = App::new();
+    let mut client_app = App::new();
+    for app in [&mut server_app, &mut client_app] {
+        app.add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            RepliconPlugins.set(ServerPlugin::new(PostUpdate)),
+        ))
+        .finish();
+    }
+    client_app.init_resource::<DespawnedFrom>();
+    client_app
+        .world_mut()
+        .resource_mut::<ReplicationRegistry>()
+        .despawn = record_server_entity;
+
+    server_app.connect_client(&mut client_app);
+
+    let server_entity = server_app.world_mut().spawn(Replicated).id();
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+
+    let client_entity = *client_app
+        .world()
+        .resource::<ServerEntityMap>()
+        .to_client()
+        .get(&server_entity)
+        .unwrap();
+
+    server_app.world_mut().despawn(server_entity);
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+
+    assert_eq!(
+        client_app.world().resource::<DespawnedFrom>().0,
+        [(client_entity, server_entity)]
+    );
+    assert!(client_app.world().get_entity(client_entity).is_err());
+}
+
+#[derive(Resource, Default)]
+struct DespawnedFrom(Vec<(Entity, Entity)>);
+
+fn record_server_entity(ctx: &DespawnCtx, mut entity: EntityWorldMut) {
+    let client_entity = entity.id();
+    entity.world_scope(|world| {
+        world
+            .resource_mut::<DespawnedFrom>()
+            .0
+            .push((client_entity, ctx.server_entity));
+    });
+    entity.despawn();
 }
 
 #[test]

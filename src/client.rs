@@ -465,7 +465,10 @@ fn apply_despawn(
 
         if let Ok(client_entity) = world.get_entity_mut(client_entity) {
             trace!("applying despawn for `{}`", client_entity.id());
-            let ctx = DespawnCtx { message_tick };
+            let ctx = DespawnCtx {
+                message_tick,
+                server_entity,
+            };
             (params.registry.despawn)(&ctx, client_entity);
         }
     }

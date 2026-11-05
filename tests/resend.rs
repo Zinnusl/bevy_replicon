@@ -239,6 +239,65 @@ fn keeps_removal_made_before_resend_is_sent() {
     );
 }
 
+#[test]
+fn resends_once() {
+    let mut server_app = App::new();
+    let mut client_app = App::new();
+    for app in [&mut server_app, &mut client_app] {
+        app.add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            RepliconPlugins.set(ServerPlugin::new(PostUpdate)),
+        ))
+        .replicate::<Counter>()
+        .finish();
+    }
+
+    server_app.connect_client(&mut client_app);
+
+    let server_entity = server_app.world_mut().spawn((Replicated, Counter(1))).id();
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+
+    let client_entity = *client_app
+        .world()
+        .resource::<ServerEntityMap>()
+        .to_client()
+        .get(&server_entity)
+        .unwrap();
+
+    let test_client = **client_app.world().resource::<TestClientEntity>();
+    server_app.world_mut().trigger(ResendReplication {
+        client: test_client,
+    });
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+
+    // The client drifts after the resend has landed, and the server has nothing new to send.
+    client_app
+        .world_mut()
+        .get_mut::<Counter>(client_entity)
+        .unwrap()
+        .0 = 7;
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+
+    assert_eq!(
+        client_app.world().get::<Counter>(client_entity),
+        Some(&Counter(7)),
+        "a later send must carry only changes, not the whole world again"
+    );
+}
+
 #[derive(Component, Deserialize, Serialize, Debug, PartialEq)]
 struct Counter(u32);
 
