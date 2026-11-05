@@ -162,6 +162,7 @@ impl Plugin for ServerPlugin {
                     collect_mappings,
                     collect_despawns,
                     collect_removals,
+                    apply_resends,
                     collect_changes,
                     send_messages,
                 )
@@ -228,9 +229,11 @@ impl Plugin for ServerPlugin {
 
 /// Makes the server send its whole visible world to one authorized client again.
 ///
-/// Trigger it on the client's entity. The server forgets which entities and components the client
-/// has acknowledged, so the next replication message carries every visible entity and component
-/// as an insertion, exactly as for a newly authorized client. The connection, the client's
+/// Trigger it on the client's entity. At the next replication send, once that send has collected
+/// despawns and removals against what the client holds, the server forgets which entities and
+/// components the client has acknowledged, so the same message carries every visible entity and
+/// component as an insertion, exactly as for a newly authorized client. A despawn or removal made
+/// after the trigger therefore still reaches the client. The connection, the client's
 /// [`ClientVisibility`] and its [`PriorityMap`] are kept, and the client applies the insertions to
 /// the entities it already has mapped, so its local entities keep their identity.
 ///
@@ -257,12 +260,23 @@ fn resend_replication(resend: On<ResendReplication>, mut clients: Query<&mut Cli
     match clients.get_mut(resend.client) {
         Ok(mut ticks) => {
             debug!("resending replication to client `{}`", resend.client);
-            ticks.entities.clear();
+            ticks.resend = true;
         }
         Err(_) => debug!(
             "ignoring replication resend for `{}`, which is not an authorized client",
             resend.client
         ),
+    }
+}
+
+/// Forgets what each client that asked for a resend holds, after this tick's despawns and
+/// removals were collected against it.
+fn apply_resends(mut clients: Query<&mut ClientTicks>) {
+    for mut ticks in &mut clients {
+        if ticks.resend {
+            ticks.resend = false;
+            ticks.entities.clear();
+        }
     }
 }
 

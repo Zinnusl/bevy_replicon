@@ -35,6 +35,12 @@ pub(crate) struct ClientTicks {
     /// message to arrive.
     pub(crate) update_tick: RepliconTick,
 
+    /// Whether the next replication send should forget [`Self::entities`] once it has collected
+    /// despawns and removals against it.
+    ///
+    /// Set by [`ResendReplication`](crate::server::ResendReplication).
+    pub(crate) resend: bool,
+
     /// Mutate message indices mapped to their info.
     mutations: HashMap<MutateIndex, MutateInfo>,
 

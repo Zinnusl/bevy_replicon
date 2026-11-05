@@ -127,5 +127,120 @@ fn restores_component_removed_on_client() {
     );
 }
 
+#[test]
+fn keeps_despawn_made_before_resend_is_sent() {
+    let mut server_app = App::new();
+    let mut client_app = App::new();
+    for app in [&mut server_app, &mut client_app] {
+        app.add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            RepliconPlugins.set(ServerPlugin::new(PostUpdate)),
+        ))
+        .replicate::<Counter>()
+        .finish();
+    }
+
+    server_app.connect_client(&mut client_app);
+
+    let server_entity = server_app.world_mut().spawn((Replicated, Counter(1))).id();
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    assert!(
+        client_app
+            .world()
+            .resource::<ServerEntityMap>()
+            .to_client()
+            .contains_key(&server_entity)
+    );
+
+    let test_client = **client_app.world().resource::<TestClientEntity>();
+    server_app.world_mut().trigger(ResendReplication {
+        client: test_client,
+    });
+    // The despawn lands between the trigger and the send that carries the resend.
+    server_app.world_mut().despawn(server_entity);
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+
+    assert!(
+        !client_app
+            .world()
+            .resource::<ServerEntityMap>()
+            .to_client()
+            .contains_key(&server_entity),
+        "the despawn must reach the client despite the resend"
+    );
+}
+
+#[test]
+fn keeps_removal_made_before_resend_is_sent() {
+    let mut server_app = App::new();
+    let mut client_app = App::new();
+    for app in [&mut server_app, &mut client_app] {
+        app.add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            RepliconPlugins.set(ServerPlugin::new(PostUpdate)),
+        ))
+        .replicate::<Counter>()
+        .replicate::<Flag>()
+        .finish();
+    }
+
+    server_app.connect_client(&mut client_app);
+
+    let server_entity = server_app
+        .world_mut()
+        .spawn((Replicated, Counter(2), Flag))
+        .id();
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+
+    let client_entity = *client_app
+        .world()
+        .resource::<ServerEntityMap>()
+        .to_client()
+        .get(&server_entity)
+        .unwrap();
+    assert!(client_app.world().get::<Flag>(client_entity).is_some());
+
+    let test_client = **client_app.world().resource::<TestClientEntity>();
+    server_app.world_mut().trigger(ResendReplication {
+        client: test_client,
+    });
+    // The removal lands between the trigger and the send that carries the resend.
+    server_app
+        .world_mut()
+        .entity_mut(server_entity)
+        .remove::<Flag>();
+
+    server_app.update();
+    server_app.exchange_with_client(&mut client_app);
+    client_app.update();
+    server_app.exchange_with_client(&mut client_app);
+
+    assert!(
+        client_app.world().get::<Flag>(client_entity).is_none(),
+        "the removal must reach the client despite the resend"
+    );
+    assert_eq!(
+        client_app.world().get::<Counter>(client_entity),
+        Some(&Counter(2))
+    );
+}
+
 #[derive(Component, Deserialize, Serialize, Debug, PartialEq)]
 struct Counter(u32);
+
+#[derive(Component, Deserialize, Serialize)]
+struct Flag;
